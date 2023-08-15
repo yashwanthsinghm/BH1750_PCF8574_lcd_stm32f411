@@ -3,7 +3,7 @@
 
 use core::u8;
 
-// Imports
+// Importss
 // use core::fmt::Write;
 use cortex_m_rt::entry;
 use panic_halt as _;
