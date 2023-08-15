@@ -1,69 +1,39 @@
 #![no_std]
 #![no_main]
 
+use core::u8;
+
 // Imports
-use core::fmt::Write;
+// use core::fmt::Write;
 use cortex_m_rt::entry;
 use panic_halt as _;
-// use stm32f4xx_hal::rcc;
 use stm32f4xx_hal::{
     i2c::Mode,
     pac::{self},
     prelude::*,
-    serial::config::Config,
+    serial::{config::Config, SerialExt},
 };
-
-use defmt_rtt as _;
-
-
-
-
+use defmt_rtt;
 #[entry]
 fn main() -> ! {
-    // Setup handler for device peripherals
-    defmt::println!("Started code");
+    // Setup handler for device peripheralshttps://github.com/wfraser/lcd-pcf8574.git
     let dp = pac::Peripherals::take().unwrap();
-
+    let cp = cortex_m::Peripherals::take().unwrap();    
     // I2C Config steps:
     // 1) Need to configure the system clocks
     // - Promote RCC structure to HAL to be able to configure clocks
     let rcc = dp.RCC.constrain();
     // - Configure system clocks
-    // 8 MHz must be used for the Nucleo-F401RE board according to manual
+    // 8 MHz must be used for the Nucleo-F401RE board according to the manual
     let clocks = rcc.cfgr.use_hse(8.MHz()).freeze();
     // 2) Configure/Define SCL and SDA pins
     let gpiob = dp.GPIOB.split();
     let scl = gpiob.pb8;
     let sda = gpiob.pb9;
-
-
-
-    // for blinking an led consider this ports:
-
-    // GPIO Initialization
-    let gpiod = dp.GPIOD.split();
-    let mut green_led = gpiod.pd12.into_push_pull_output();
-    let mut orange_led = gpiod.pd13.into_push_pull_output();
-    let mut red_led = gpiod.pd14.into_push_pull_output();
-    let mut blue_led = gpiod.pd15.into_push_pull_output();
-
-
-
-    
-
-
-
-    //defining a clock
-    // Create a delay abstraction based on SysTick
-    let dm =cortex_m::peripheral::Peripherals::take().unwrap();
-    let mut delays = dm.SYST.delay(&clocks);
-
-
-
-
     // 3) Configure I2C peripheral channel
-
-
+    // We're going to use I2C1 since its pins are the ones connected to the I2C interface we're using
+    // To configure/instantiate serial peripheral channel we have two options:
+    // Use the i2c device peripheral handle and instantiate a transmitter instance using an extension trait
     let mut i2c = dp.I2C1.i2c(
         (scl, sda),
         Mode::Standard {
@@ -71,61 +41,108 @@ fn main() -> ! {
         },
         &clocks,
     );
+    // Or use the I2C abstraction
+    // let mut i2c = I2c::new(
+    //     dp.I2C1,
+    //     (scl, sda),
+    //     Mode::Standard {
+    //         frequency: 300.kHz(),
+    //     },
+    //     &clocks,
+    // );.
 
 
-    // BH1750 I2C Address
-    const BH1750_ADDR: u8 = 0x23;
-    const POWER_DOWN: u8 = 0x00;
-    let power_cont:u8=0x10;
-    const POWER_ON: u8 = 0x01;
-    const RESET: u8 = 0x07;
-    const CONTINUOUS_HIGH_RES_MODE: u8 = 0x10;
+    let mut delay = dp.TIM1.delay_ms(&clocks);
+
+
+    // PCF8574 I2C Address
+    const PCF8574_ADDR: u8 = 0x27;    
+    let clear_display = 0x01; //*********rs pin********
+    let return_home = 0x02;//cursor comes to original position// ******rw pin*******
+    let entry_mode_set = 0x06;//assign cursor moving direction and enable the shift of entire display
+    let display_on_off= 0x0F;
+    let cursor_display_shift = 0x1C;//set cursor moving and display shift control bit, and the direction without changing of DDRAM data 
+    let function_set = 0x28;//******D5 pin ********//set interface data length 4bit or 8 bit
+    let cg_ram_address = 0x40;//  ****** D6 pin******//CGRAM address usage is a way of creating custom characters and patterns on an LCD display
+    let dd_ram_address = 0x80;//*******D7 pin ******//DD-RAM address usage is a way of accessing the data stored in the display data RAM
+
+//DDRAM is used to store the data that is displayed on the LCD screen, 
+//while CGRAM is used to store the data that defines the shape of custom characters and symbols.
+
+
+    let output_config: u8 = 0x00; // let rs = 0x00;     let EntryLeft = 0x00;       let BlinkOff = 0x00;
+    // Send data 4 bits at the time
+    let Bit4 = 0x00;
+    const D4: u8 = 0x10;        //let CursorShift = 0x10;
+    // Send data 8 bits at the time
+    let Bit8 = 0x10;
+
+    i2c.write(PCF8574_ADDR, &[function_set]);
+    delay.delay_ms(10_u32);
+    i2c.write(PCF8574_ADDR, &[display_on_off]);
+    delay.delay_ms(10_u32);
+    i2c.write(PCF8574_ADDR, &[clear_display]);
+    delay.delay_ms(10_u32);
+    i2c.write(PCF8574_ADDR, &[entry_mode_set]);
+    delay.delay_ms(10_u32);
+    i2c.write(PCF8574_ADDR, &[return_home]);
+    delay.delay_ms(10_u32);
 
 
 
-    // let check2 = i2c.write(BH1750_ADDR, &[POWER_ON]).is_ok();
-    // defmt::println!(".... :->  {:?}",check2);
-    let mut rx_buffer: [u8; 2] = [0; 2];
-    let mut rx_word: u16;
-
-    //Power on the sensor
-    i2c.write(BH1750_ADDR, &[POWER_ON]).unwrap();
-    delays.delay_ms(10_u32);
-    i2c.write(BH1750_ADDR, &[power_cont]).unwrap();
-    delays.delay_ms(10_u32); // Wait for power-on initialization
+    i2c.write(PCF8574_ADDR, &[cg_ram_address]);
+    delay.delay_ms(10_u32);
+    i2c.write(PCF8574_ADDR, &[dd_ram_address]);
+    delay.delay_ms(10_u32);
 
 
-    // Application Loop
+
+
+
     loop{
-    let mut count=0;
-    while count<1 {
-        // Read light intensity data
-            green_led.set_high();
-            orange_led.set_high();
-            red_led.set_high();
-            blue_led.set_high();
 
-            delays.delay_ms(500_u32);
 
-            green_led.set_low();
-            orange_led.set_low();
-            red_led.set_low();
-            blue_led.set_low();
 
-            delays.delay_ms(500_u32);
-            count+=1;
-        }
+    i2c.write(PCF8574_ADDR, &[cursor_display_shift]);
+    delay.delay_ms(10_u32);
 
-        i2c.read(BH1750_ADDR, &mut rx_buffer).unwrap();
+        // let x= 0xFF;
+        // i2c.write(PCF8574_ADDR, &[x]).unwrap();
+        // The number you want to display
+        let d1=1;
+        let d2=2;
 
-        rx_word = ((rx_buffer[0] as u16) << 8) | rx_buffer[1] as u16;  
-        
-        // Convert light intensity data to lux (value format as per datasheet)
-        let lux = (rx_word as f32 / 1.2) as u16;
-        
-        // Print light intensity in lux
-        defmt::println!(" Bh1750 intensity value: {:?}",lux as u16);
+// Define custom characters for digits (if needed)
 
+
+// Send commands to display the first digit
+        let _= i2c.write(PCF8574_ADDR, &[dd_ram_address | 0x00, d1]).unwrap();
+        delay.delay_ms(100_u32);
+        i2c.write(PCF8574_ADDR, &[d1]).ok();
+        defmt::println!("middle order thammudu");
+
+
+// Send commands to display the second digit
+        let _= i2c.write(PCF8574_ADDR, &[dd_ram_address | 0x01, d2]).unwrap();
+        delay.delay_ms(100_u32);
+        defmt::println!("print cheyyara ungamma");
     }
-
 }
+
+
+
+
+
+
+
+    
+
+
+//RS => 1, characters  => data register is delected
+//RS => 0, numbeers  => instructtion register is selected
+
+
+
+
+    
+ 
